@@ -430,7 +430,7 @@ The engineering progression can be summarized by comparing the major implementat
 | Space 2 (Local CPU Diffusion) | Hugging Face free CPU | 150–300 sec/image | Low | Moderate | Poor | Compute limitations, crashes |
 | Gemini Hosted API | External hosted API | Not fully testable | Failed | N/A | N/A | 429 RESOURCE_EXHAUSTED quota limits |
 | HF Hosted Inference (hf-inference + FLUX attempt) | Hosted inference | Not fully testable | Failed | N/A | N/A | 410 deprecated provider-model mismatch |
-| Space 3 (fal.ai + FLUX hosted inference) | Hosted inference via fal.ai | 5–20 sec/image | High | High | Moderate to Poor | Persistent identity drift |
+| Space 3 (fal.ai + FLUX hosted inference) | Hosted inference via fal.ai | 5–20 sec/image | High | High | Moderate | Identity drift based on prompt detail and quality |
 
 Several patterns became clear.
 
