@@ -421,6 +421,27 @@ This was not a code optimization.
 
 It was a system architecture redesign.
 
+# 5.5 Comparative System Evaluation
+
+The engineering progression can be summarized by comparing the major implementations tested during the project.
+
+| System Version | Deployment Method | Typical Latency | Reliability | Image Quality | Identity Consistency | Major Constraint |
+|---------------|------------------|----------------|-------------|--------------|---------------------|------------------|
+| Space 2 (Local CPU Diffusion) | Hugging Face free CPU | 150–300 sec/image | Low | Moderate | Poor | Compute limitations, crashes |
+| Gemini Hosted API | External hosted API | Not fully testable | Failed | N/A | N/A | 429 RESOURCE_EXHAUSTED quota limits |
+| HF Hosted Inference (hf-inference + FLUX attempt) | Hosted inference | Not fully testable | Failed | N/A | N/A | 410 deprecated provider-model mismatch |
+| Space 3 (fal.ai + FLUX hosted inference) | Hosted inference via fal.ai | 5–20 sec/image | High | High | Moderate to Poor | Persistent identity drift |
+
+Several patterns became clear.
+
+First, moving inference off local CPU dramatically improved runtime performance and deployment stability.
+
+Second, hosted infrastructure introduced its own engineering risks, including quota limits and provider compatibility constraints.
+
+Third, better image quality did not automatically solve the deeper research problem of identity consistency.
+
+This confirmed that compute performance and subject continuity are related but separate engineering challenges.
+
 ---
 
 # 6. What the move cost me
