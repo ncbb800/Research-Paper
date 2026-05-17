@@ -1,12 +1,14 @@
-# Research Paper Draft
-
-# Character Consistency Under Resource Constraints: From CPU-Based Diffusion Failure to API-Based Image Generation
+# From CPU Failure to Hosted Inference: Solving Compute Constraints While Exposing Persistent Identity Drift in AI Image Generation
 
 ## Abstract
 
-This project investigated a practical engineering problem in AI image generation: whether a free, CPU-only Hugging Face Space could reliably generate the same anime character across multiple scenes for storytellers and hobbyist creators. The initial implementation (Space 2) used a lightweight prompt-based diffusion pipeline deployed entirely on Hugging Face’s free CPU tier. While the system successfully generated anime-style images, it consistently failed to preserve character identity across multiple generations and frequently encountered severe inference latency and deployment limitations.
+This project explored a practical engineering problem in AI image generation: whether a freely deployable web application could generate visually consistent images of the same subject across multiple scenes and artistic styles.
 
-After multiple failed attempts to improve consistency through prompt engineering, seed control, and lighter diffusion models, the final solution (Space 3) shifted the architecture away from local CPU inference toward an API-based image generation pipeline using an external hosted model. This architectural change solved the deployment and performance bottleneck, but introduced new trade-offs in external dependency, latency variability, reduced transparency, and loss of low-level model control.
+The original goal was to build a tool for storytellers, designers, and student creators who want to define a subject once and then generate that same subject in different settings. The baseline implementation (Space 2) ran a local diffusion pipeline on Hugging Face’s free CPU infrastructure. While it successfully generated images, inference was extremely slow, larger models failed to run, and prompt-only generation produced severe identity drift.
+
+Several incremental fixes were attempted, including prompt engineering, deterministic seed control, larger hosted models, and identity-conditioning research. Hosted APIs introduced new engineering constraints, including quota failures and provider compatibility issues. Eventually, the successful architectural move was to shift heavy inference to hosted image generation using fal.ai-hosted FLUX models through a Hugging Face Space frontend.
+
+This solved the compute and deployment problem, dramatically improved image quality, and allowed multi-style image generation. However, a deeper limitation remained: even strong hosted text-to-image systems do not reliably preserve persistent subject identity across different scenes.
 
 This paper documents that engineering progression.
 
@@ -14,60 +16,73 @@ This paper documents that engineering progression.
 
 # 1. What I wanted to build
 
-I wanted to build a practical tool for **student storytellers, manga hobbyists, and anime creators** who need visual consistency for recurring characters.
+I wanted to build a practical AI image generation tool for:
 
-The more interesting version of this idea was not simply generating anime art from prompts. Basic anime generators already exist. The actual user problem was more specific:
+- storytellers
+- concept artists
+- student creators
+- game designers
+- hobby visual creators
 
-**Can a user define a character once and then generate that same character across multiple scenes while preserving recognizable identity?**
+The user problem was not simply "generate an image."
 
-Example use case:
+That problem is already solved by many public tools.
 
-A user creates:
+The more interesting version was:
 
-> “A silver-haired anime girl with blue eyes, black school uniform, red ribbon.”
+**Can a user define a subject once, then generate that same recognizable subject across multiple scenes and artistic styles?**
+
+Example:
+
+A user defines:
+
+> A silver-haired young woman with sharp blue eyes, black jacket, red scarf, and calm expression.
 
 Then asks for:
 
-- standing on a rooftop at sunset
-- walking in a futuristic city
-- fighting in a fantasy battlefield
-- smiling in a classroom
-- crying in the rain
+- standing in futuristic Tokyo at night
+- walking through a rainy cyberpunk alley
+- painted as an oil portrait
+- rendered as anime
+- transformed into fantasy concept art
+- placed in a medieval castle
 
-The expected outcome is a consistent character appearing in multiple scenes, similar to a manga protagonist.
+The expectation is not just visual similarity in style, but persistent identity.
 
-This is much more difficult than single-image generation.
+That requires:
 
-The more interesting version of the project required:
+- subject consistency
+- multi-style flexibility
+- acceptable latency
+- free or low-cost deployment
+- practical usability
 
-- persistent visual identity
-- acceptable generation speed
-- free deployment
-- real usability for hobby creators
-
-That became the target.
+This was significantly harder than basic text-to-image generation.
 
 ---
 
 # 2. The rudimentary baseline (Space 2)
 
-The baseline implementation was **Anime Character Consistency Generator**, deployed as a Hugging Face Space using:
-
-- Gradio frontend
-- Python backend
-- Diffusers
-- Hugging Face free CPU Basic hardware
-- Waifu Diffusion / lightweight anime diffusion pipelines
+The baseline implementation was **Anime Character Consistency Generator**, deployed entirely on Hugging Face’s free CPU tier.
 
 Architecture:
 
-User Input
-↓
-Prompt Construction
-↓
-Diffusion Pipeline (CPU)
-↓
-Generated Anime Image
+User Input  
+↓  
+Prompt Construction  
+↓  
+Local Diffusion Pipeline (CPU)  
+↓  
+Generated Image
+
+Technology stack:
+
+- Hugging Face Spaces
+- Gradio
+- Python
+- Diffusers
+- PyTorch
+- Waifu Diffusion / lightweight anime diffusion models
 
 The interface accepted:
 
@@ -77,68 +92,52 @@ The interface accepted:
 - style
 - optional seed
 
-This baseline worked in the most literal sense.
-
-It successfully generated anime images.
-
 Example prompt:
 
-> anime style illustration of a silver-haired anime girl with blue eyes, standing on a rooftop at sunset, dramatic mood
+> anime-style silver-haired girl with blue eyes standing on a rooftop at sunset
 
-Outputs looked visually plausible.
+The baseline technically worked.
 
-However, the baseline was insufficient in two major ways:
+It generated anime images successfully.
 
-### Identity Drift
+However, it failed in two important ways.
 
-The same character prompt often produced different-looking people.
+## Identity Drift
 
-Changes included:
+Repeated generations with the same character description produced visibly different faces.
 
-- different face structure
-- altered eye shape
-- inconsistent clothing
-- hairstyle drift
-- age appearance changes
+Observed changes:
+
+- altered facial structure
+- different eye proportions
+- inconsistent hair shape
+- outfit drift
+- age changes
+- expression distortion
 
 This made the system unsuitable for story continuity.
 
-### Performance
-
-CPU inference was extremely slow.
-
-Observed timings:
-
-- 1 image: ~150–300 seconds
-- larger models: failed to initialize
-- repeated generations: unstable performance
-
-The system technically worked, but not well enough for the intended use case.
-
 ---
 
-# 3. The constraint
+## Performance Constraints
 
-The constraint was:
-
-**Free CPU deployment cannot efficiently support identity-consistent diffusion workflows.**
-
-This appeared in two concrete forms.
-
-## Constraint 1: Compute Performance
-
-Running diffusion locally on free Hugging Face CPU caused severe latency.
+Running diffusion locally on free CPU was extremely slow.
 
 Observed timings:
 
-Waifu Diffusion:
-- 180–240 seconds/image
+- 150–300 seconds per image
+- occasional container instability
+- repeated slow cold starts
+
+Larger models failed entirely.
+
+Examples:
 
 SDXL:
-- initialization failure
+failed to initialize
 
 FLUX:
-- impossible on free CPU
+unusable locally
 
 Errors included:
 
@@ -146,48 +145,96 @@ Errors included:
 RuntimeError: CUDA unavailable
 ```
 
-and
-
 ```python
 MemoryError
 ```
-
-and occasionally:
 
 ```python
 Container crashed during model loading
 ```
 
-This made larger identity-preserving models unusable.
+The baseline worked, but not at a usable engineering level.
 
 ---
 
-## Constraint 2: Identity Consistency
+# 3. The constraint
 
-Even when inference succeeded, prompt-only conditioning failed to preserve identity.
+The main constraint was:
 
-Repeated generations with fixed seed still drifted.
+**Free CPU deployment could not support practical identity-consistent image generation.**
 
-Observed issues:
+This appeared in several forms.
 
-Prompt:
-> silver-haired anime girl with blue eyes
+---
 
-Generation 1:
-- younger face
-- school uniform
+## Constraint 1: Local Compute Limits
 
-Generation 2:
-- older facial structure
-- different ribbon
-- different eye proportions
+Local inference on free CPU was too slow.
 
-Generation 3:
-- altered hairstyle entirely
+Observed:
 
-This revealed a deeper limitation:
+Waifu Diffusion:
+180–240 sec/image
+
+Larger models:
+complete failure
+
+The local environment simply could not support modern image generation workloads.
+
+---
+
+## Constraint 2: Prompt-Only Identity Failure
+
+Even when generation succeeded, prompt-only conditioning did not preserve subject identity.
+
+Repeated generations changed:
+
+- face shape
+- hairstyle
+- facial age
+- eye structure
+- clothing
+
+This revealed:
 
 **Text prompts describe a category, not a persistent identity.**
+
+---
+
+## Constraint 3: Hosted API Access Limits
+
+I attempted to solve compute limits by moving inference to Gemini image generation.
+
+This introduced a new failure:
+
+```txt
+429 RESOURCE_EXHAUSTED
+Quota exceeded
+free tier limit: 0
+```
+
+Meaning:
+
+the architecture was valid, but API access was unavailable under free-tier limits.
+
+---
+
+## Constraint 4: Provider Compatibility Failures
+
+I then moved to Hugging Face hosted inference.
+
+My first FLUX implementation failed with:
+
+```txt
+410 Gone
+The requested model is deprecated and no longer supported by provider hf-inference
+```
+
+Meaning:
+
+model selection alone was insufficient.
+
+Provider compatibility mattered.
 
 ---
 
@@ -199,203 +246,237 @@ I increased prompt specificity.
 
 Instead of:
 
-> anime girl
+> young woman
 
 I used:
 
-> silver-haired anime girl with blue eyes, black blazer, red ribbon, youthful face, soft expression
+> silver-haired young woman with sharp blue eyes, red scarf, black jacket, calm expression
 
-This slightly improved consistency.
+Result:
+
+slightly better consistency
 
 But identity drift remained.
 
-The model still reinterpreted the prompt each time.
+The model still reinterpreted the prompt every time.
 
 ---
 
-## Attempt 2: Fixed Seed
+## Attempt 2: Fixed Seed Control
 
-I added deterministic seed control.
+I introduced deterministic seed control.
 
 Expectation:
 
-Same prompt + same seed = same character.
+Same prompt + same seed = same subject
 
 Reality:
 
-This worked only if everything else remained unchanged.
+This helped reproducibility only when everything else remained unchanged.
 
-Changing the scene caused divergence.
+Changing the scene still caused divergence.
 
-Seed locking improved reproducibility, not persistent identity.
+Seed locking improved repeatability, not persistent identity.
 
 ---
 
-## Attempt 3: Larger Models
+## Attempt 3: Larger Local Models
 
 I attempted:
 
 - SDXL
 - FLUX
-- Juggernaut XL
+- Juggernaut
 
-These models produced better images.
+Result:
 
-But deployment failed.
+better theoretical capability
 
-Observed failures:
+Actual outcome:
 
-- build timeout
-- memory crash
-- container restart
+deployment failure
 
-The free CPU environment could not sustain them.
+Observed:
+
+- build timeouts
+- memory crashes
+- container restarts
+
+Conclusion:
+
+local hardware constraints prevented scaling.
 
 ---
 
-## Attempt 4: Identity Conditioning
+## Attempt 4: Identity Conditioning Research
 
 I investigated:
 
-- IP-Adapter FaceID
-- ControlNet
-- reference-image conditioning
+- IP-Adapter
+- FaceID
+- ControlNet reference conditioning
 
-These were theoretically strong solutions.
+These appeared promising.
 
-But practically impossible within the hardware constraints.
+However:
 
-Inference overhead was too high.
+they required heavier inference pipelines unsuitable for free CPU deployment.
 
-This became a dead end for local deployment.
+Conclusion:
+
+theoretically correct, practically infeasible.
+
+---
+
+## Attempt 5: Gemini Hosted Image API
+
+I shifted inference off local hardware.
+
+Expectation:
+
+hosted inference solves compute limits
+
+Actual result:
+
+```txt
+429 RESOURCE_EXHAUSTED
+```
+
+because the Gemini image model had no usable free-tier quota.
+
+Conclusion:
+
+external APIs solve compute but introduce access dependency.
+
+---
+
+## Attempt 6: Hugging Face Hosted Inference
+
+I switched to Hugging Face hosted inference.
+
+Expectation:
+
+same ecosystem, easier deployment
+
+Actual result:
+
+```txt
+410 Gone
+```
+
+because FLUX was not supported by the selected provider.
+
+Conclusion:
+
+hosted inference requires provider-model compatibility awareness.
 
 ---
 
 # 5. The move that worked (Space 3)
 
-The working architectural shift was:
+The successful architectural move was:
 
-**Move generation off the local CPU entirely and use hosted API inference.**
+**Move heavy inference entirely off local hardware and route image generation to hosted fal.ai FLUX inference through a Hugging Face frontend.**
 
-Instead of:
+New architecture:
 
-Local Space CPU → Diffusion model
+User  
+↓  
+Hugging Face Gradio frontend  
+↓  
+Style selection  
+↓  
+Routing layer  
+↓  
+fal.ai hosted FLUX inference  
+↓  
+Generated image
 
-The new architecture became:
+This solved:
 
-User
-↓
-Hugging Face Gradio frontend
-↓
-External image generation API
-↓
-Hosted inference model
-↓
-Returned image
-
-Candidate hosted systems:
-
-- Hugging Face Inference API
-- Stability API
-- Replicate
-- Google AI Studio image endpoints
-
-This solved the core deployment constraint.
+- CPU limitations
+- local memory failures
+- deployment instability
+- unacceptable inference times
 
 Results:
 
-Generation latency:
-
 Before:
-180–300 sec/image
+
+150–300 sec/image
 
 After:
+
 5–20 sec/image
+
+Quality:
+
+dramatically improved
 
 Reliability:
 
-Before:
-frequent crashes
+stable hosted inference
 
-After:
-stable responses
+This was not a code optimization.
 
-Image quality:
-
-significantly improved
-
-Now the Space could support stronger models without local inference burden.
-
-This was the architectural breakthrough.
-
-Not “better prompts.”
-
-Not “code optimization.”
-
-A system architecture change.
+It was a system architecture redesign.
 
 ---
 
 # 6. What the move cost me
 
-Every engineering fix introduces a trade-off.
+Every engineering fix introduces trade-offs.
 
 This one did too.
 
+---
+
 ## External Dependency
 
-The app now depends on third-party infrastructure.
+The application now depends on:
 
-If the API fails:
+- fal.ai
+- hosted inference availability
+- API routing
+
+If the provider fails:
 
 the product fails.
 
-Previously, local inference was self-contained.
-
-Now it is not.
+Local inference avoided this dependency.
 
 ---
 
-## Rate Limits
+## Rate Limits / Billing Risk
 
-Hosted APIs often impose:
+Hosted inference may impose:
 
-- request quotas
-- throughput caps
-- billing thresholds
+- quotas
+- throttling
+- paid usage
 
-This limits scalability.
+This creates operational constraints.
 
 ---
 
-## Reduced Control
+## Reduced Low-Level Control
 
-With local pipelines, I could tune:
+With local diffusion, I could tune:
 
+- schedulers
 - inference steps
-- scheduler behavior
-- memory handling
-- exact model internals
+- precision
+- memory behavior
 
-API systems abstract those away.
+Hosted systems abstract those away.
 
-This improves simplicity but reduces flexibility.
+Convenience increased.
 
----
-
-## Privacy
-
-User prompts now leave the local application environment.
-
-For public creative tools this may be acceptable.
-
-For sensitive domains, this would matter.
+Control decreased.
 
 ---
 
 ## Latency Variability
-
-API response times fluctuate.
 
 Observed:
 
@@ -403,93 +484,122 @@ best case:
 5 sec
 
 worst case:
-30+ sec
+20–30 sec
 
-Still better than CPU diffusion, but less predictable.
+Still dramatically better than local CPU.
+
+But less predictable.
+
+---
+
+## Persistent Identity Still Fails
+
+This was the most important remaining trade-off.
+
+Even with strong hosted FLUX inference:
+
+faces still changed across scenes.
+
+Why?
+
+Because the system remained text-to-image.
+
+No persistent identity embeddings were used.
+
+The hosted model improved quality and speed, but not true subject continuity.
 
 ---
 
 # 7. What I'd do next
 
-The current system solves deployment and performance, but not the deeper research question.
+The current system solved deployment.
 
-The remaining major constraint is:
+It did not solve identity persistence.
 
-**true persistent character identity**
-
-Even with better hosted models, prompt-only conditioning remains imperfect.
-
-The next move would be:
+The next engineering move would be:
 
 ## Reference-Based Identity Conditioning
 
 Architecture:
 
-User uploads character reference image
-↓
-Identity embedding extraction
-↓
-Conditioned image generation
-↓
-consistent character outputs
+User uploads reference image  
+↓  
+Identity embedding extraction  
+↓  
+Conditioned generation  
+↓  
+Consistent outputs
 
 Candidate tools:
 
 - IP-Adapter
-- FaceID pipelines
-- ControlNet reference conditioning
+- FaceID
+- ControlNet reference pipelines
+- image-to-image workflows
 
-This would directly target identity persistence.
+This directly addresses the core unresolved problem.
 
-New constraint:
+---
 
-compute cost and infrastructure complexity.
+## LoRA Personalization
 
-Another possible direction:
+Another possibility:
 
-fine-tuning lightweight LoRA character models.
+train lightweight personalized subject models.
 
-That introduces:
+Architecture:
 
-- training cost
-- storage burden
-- personalization pipeline complexity
+subject images  
+↓  
+LoRA fine-tuning  
+↓  
+specialized generation
 
-The engineering cycle continues.
+Trade-offs:
+
+- training time
+- storage
+- complexity
+- user onboarding friction
 
 ---
 
 # Acknowledgments
 
-This project relied heavily on free AI infrastructure and open-source tooling.
+This project relied heavily on free and open AI infrastructure.
 
 Tools used:
 
 - Hugging Face Spaces
 - Gradio
-- Hugging Face Diffusers
+- Hugging Face hosted inference
+- fal.ai
 - Hugging Face model hub
+- Diffusers
 - Python
 - PyTorch
-- Google AI Studio (evaluation/testing)
-- open-source anime diffusion models
+- Gemini API experimentation
 
-Without free public AI tooling, this kind of iterative experimentation would have been much harder for student researchers.
+Without public AI infrastructure, iterative experimentation at this scale would not have been possible.
 
 ---
 
 # Conclusion
 
-The most important lesson from this project was that engineering constraints shape research direction.
+The biggest lesson from this project was that engineering constraints shape research direction.
 
-The original goal was anime character consistency.
+The original problem was persistent subject identity in generated imagery.
 
-The naive implementation failed because free CPU infrastructure could not support the required compute or model architecture.
+The first implementation failed because local CPU infrastructure could not support practical image generation workloads.
 
-Incremental fixes were insufficient.
+Incremental prompt-based fixes were insufficient.
 
-The successful move required architectural redesign: shifting from local inference to hosted APIs.
+Hosted APIs solved deployment and compute constraints, but introduced new dependencies and compatibility failures.
 
-That solved one constraint while exposing the next.
+Even after solving infrastructure, the deeper research problem remained:
 
-This is what practical AI engineering looks like.
+**high-quality text-to-image generation does not equal persistent identity consistency.**
+
+This is what practical AI engineering looks like:
+
+solve one constraint, expose the next.
